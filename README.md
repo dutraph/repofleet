@@ -63,11 +63,13 @@ make uninstall
 
 ### O que faz
 
-- **Varre** seus diretórios e lista todos os repositórios git encontrados
-- Mostra ao lado o **ícone do provedor** (estilo oh-my-zsh):  GitHub ·  GitLab ·  Azure DevOps ·  Bitbucket ·  local
-- Detecta **repositórios duplicados** (mesmo remoto clonado em mais de um path) e marca com `⧉ i/n`
-- **Ações git em massa**: selecione vários repos e dê `pull --ff-only` ou `fetch --all --prune` de uma vez
-- **Conecta ao seu servidor git via PAT** (GitHub, GitLab, Azure DevOps, Bitbucket), lista os repositórios remotos e permite **escolher qual clonar e o path local**
+- **Varre** seus diretórios e lista todos os repositórios git, com o **ícone do provedor** ao lado (estilo oh-my-zsh):  GitHub ·  GitLab ·  Azure DevOps ·  Bitbucket ·  local
+- **Busca** (`/`) e **filtro por tipo** (`t`) — escolha um provedor e veja só os repos dele
+- Detecta **duplicados** (mesmo remoto em mais de um path), marca com `⧉ i/n` e tem uma **tela dedicada** (`D`) que agrupa por repo e lista os paths de cada cópia
+- **Ações git em massa**: `pull --ff-only`, `pull --prune`, `fetch`, e **fetch all** (sincroniza todos de uma vez)
+- **Troca de branch** (`b`) e **remoção** da cópia local (`d`, com confirmação)
+- **Barra de comando `:`** para rodar qualquer comando git no repo selecionado, de qualquer tela — inclusive interativos (`commit`, `rebase -i`, `add -p`)
+- **Conecta ao seu servidor git via PAT** (GitHub, GitLab, Azure DevOps, Bitbucket), lista os repos remotos, deixa escolher **HTTPS ou SSH** e **navega o filesystem** (com filtro e **criar pasta**) para definir onde clonar
 - Antes de clonar, **avisa se aquele repositório já está clonado** em outro path da sua máquina
 
 ### Uso
@@ -82,7 +84,7 @@ fleet switch <nome>   # troca a conta ativa
 
 Atalhos na TUI: `espaço` selecionar · `a` todos · `p` pull · `P` pull --prune · `f` fetch · `F` fetch all (sync) · `b` trocar branch · `d` remover · `D` duplicados · `t` filtrar por tipo · `/` buscar · `:` comando git · `c` clonar do servidor · `enter` detalhes · `r` rescan · `?` ajuda · `q` sair.
 
-Os diretórios varridos ficam em `scan_roots` no config (`~/.config/repos/config.yaml`); por padrão é o seu `$HOME`.
+Os diretórios varridos ficam em `scan_roots` no config (`~/.config/fleet/config.yaml`); por padrão é o seu `$HOME`.
 
 <p align="right"><a href="#repofleet">▲ back to top</a></p>
 
@@ -133,11 +135,13 @@ make uninstall
 
 ### What it does
 
-- **Scans** your directories and lists every git repo found
-- Shows the **provider icon** next to each (oh-my-zsh style):  GitHub ·  GitLab ·  Azure DevOps ·  Bitbucket ·  local
-- Detects **duplicate repos** (same remote cloned into more than one path) and tags them `⧉ i/n`
-- **Bulk git actions**: multi-select repos and `pull --ff-only` or `fetch --all --prune` them at once
-- **Connects to your git server via PAT** (GitHub, GitLab, Azure DevOps, Bitbucket), lists remote repos and lets you **pick which one to clone and the local path**
+- **Scans** your directories and lists every git repo, with the **provider icon** next to each (oh-my-zsh style):  GitHub ·  GitLab ·  Azure DevOps ·  Bitbucket ·  local
+- **Search** (`/`) and **filter by type** (`t`) — pick a provider and see only its repos
+- Detects **duplicates** (same remote in more than one path), tags them `⧉ i/n`, and has a **dedicated view** (`D`) that groups by repo and lists each copy's path
+- **Bulk git actions**: `pull --ff-only`, `pull --prune`, `fetch`, and **fetch all** (sync every repo at once)
+- **Switch branch** (`b`) and **remove** the local copy (`d`, with confirmation)
+- **`:` command bar** to run any git command on the selected repo, from any screen — including interactive ones (`commit`, `rebase -i`, `add -p`)
+- **Connects to your git server via PAT** (GitHub, GitLab, Azure DevOps, Bitbucket), lists remote repos, lets you choose **HTTPS or SSH** and **browse the filesystem** (with filter and **create-folder**) to pick where to clone
 - Before cloning, **warns if that repo is already cloned** elsewhere on your machine
 
 ### Usage
@@ -152,7 +156,7 @@ fleet switch <name>   # switch the active account
 
 TUI keys: `space` select · `a` all · `p` pull · `P` pull --prune · `f` fetch · `F` fetch all (sync) · `b` switch branch · `d` remove · `D` duplicates · `t` filter by type · `/` search · `:` git command · `c` clone from server · `enter` details · `r` rescan · `?` help · `q` quit.
 
-Scanned directories live under `scan_roots` in the config (`~/.config/repos/config.yaml`); defaults to your `$HOME`.
+Scanned directories live under `scan_roots` in the config (`~/.config/fleet/config.yaml`); defaults to your `$HOME`.
 
 <p align="right"><a href="#repofleet">▲ back to top</a></p>
 
@@ -203,11 +207,13 @@ make uninstall
 
 ### Qué hace
 
-- **Escanea** tus directorios y lista todos los repositorios git encontrados
-- Muestra el **icono del proveedor** (estilo oh-my-zsh):  GitHub ·  GitLab ·  Azure DevOps ·  Bitbucket ·  local
-- Detecta **repositorios duplicados** (mismo remoto clonado en más de un path) y los marca con `⧉ i/n`
-- **Acciones git en lote**: selecciona varios repos y haz `pull --ff-only` o `fetch --all --prune` a la vez
-- **Se conecta a tu servidor git vía PAT** (GitHub, GitLab, Azure DevOps, Bitbucket), lista los repos remotos y permite **elegir cuál clonar y el path local**
+- **Escanea** tus directorios y lista todos los repositorios git, con el **icono del proveedor** al lado (estilo oh-my-zsh):  GitHub ·  GitLab ·  Azure DevOps ·  Bitbucket ·  local
+- **Búsqueda** (`/`) y **filtro por tipo** (`t`) — elige un proveedor y ve solo sus repos
+- Detecta **duplicados** (mismo remoto en más de un path), los marca con `⧉ i/n` y tiene una **pantalla dedicada** (`D`) que agrupa por repo y lista el path de cada copia
+- **Acciones git en lote**: `pull --ff-only`, `pull --prune`, `fetch`, y **fetch all** (sincroniza todos a la vez)
+- **Cambiar de branch** (`b`) y **eliminar** la copia local (`d`, con confirmación)
+- **Barra de comandos `:`** para ejecutar cualquier comando git en el repo seleccionado, desde cualquier pantalla — incluso interactivos (`commit`, `rebase -i`, `add -p`)
+- **Se conecta a tu servidor git vía PAT** (GitHub, GitLab, Azure DevOps, Bitbucket), lista los repos remotos, permite elegir **HTTPS o SSH** y **navegar el filesystem** (con filtro y **crear carpeta**) para definir dónde clonar
 - Antes de clonar, **avisa si ese repositorio ya está clonado** en otro path de tu máquina
 
 ### Uso
@@ -222,6 +228,6 @@ fleet switch <nombre> # cambia la cuenta activa
 
 Atajos en la TUI: `espacio` seleccionar · `a` todos · `p` pull · `P` pull --prune · `f` fetch · `F` fetch all (sync) · `b` cambiar branch · `d` eliminar · `D` duplicados · `t` filtrar por tipo · `/` buscar · `:` comando git · `c` clonar del servidor · `enter` detalles · `r` rescan · `?` ayuda · `q` salir.
 
-Los directorios escaneados están en `scan_roots` del config (`~/.config/repos/config.yaml`); por defecto tu `$HOME`.
+Los directorios escaneados están en `scan_roots` del config (`~/.config/fleet/config.yaml`); por defecto tu `$HOME`.
 
 <p align="right"><a href="#repofleet">▲ volver arriba</a></p>
