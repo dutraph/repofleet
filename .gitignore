@@ -1,0 +1,61 @@
+# Binaries
+/repos
+/repos.exe
+/bin/
+/dist/
+*.test
+*.out
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Coverage
+coverage.*
+*.coverprofile
+profile.cov
+
+# Go workspace file
+go.work
+go.work.sum
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+*~
+
+# ---------------------------------------------------------------------
+# Secrets / local credentials — these MUST never be committed.
+# The on-disk config lives in $XDG_CONFIG_HOME/repos/config.yaml on
+# Linux and ~/Library/Application Support/repos/config.yaml on macOS,
+# but the patterns below catch the failure mode where someone runs the
+# tool from the repo root with $XDG_CONFIG_HOME unset, or drops a
+# private YAML next to the source for testing.
+# ---------------------------------------------------------------------
+.env
+.env.*
+*.env
+config.yaml
+config.yml
+config.local.*
+repos.yaml
+repos.yml
+*.pat
+*.token
+*.secret
+*.secrets
+secrets/
+credentials
+credentials.*
+.repos/
+.repos-config*
+.netrc
+
+# Anything obviously labelled "local" by the user
+*.local
+local.*
