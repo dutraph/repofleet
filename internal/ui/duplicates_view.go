@@ -25,9 +25,15 @@ type dupGroup struct {
 
 type duplicatesView struct {
 	groups []dupGroup
-	tbl    table.Model
-	w, h   int
-	built  bool
+
+	// provider filter: provSel 0 = all; otherwise provCycle[provSel-1].
+	provCycle []provider.Kind
+	provSel   int
+	filtered  []int // indices into groups currently shown
+
+	tbl   table.Model
+	w, h  int
+	built bool
 }
 
 func newDuplicatesView(repos []scanner.Repo) *duplicatesView {
@@ -50,11 +56,31 @@ func newDuplicatesView(repos []scanner.Repo) *duplicatesView {
 		groups = append(groups, *byKey[k])
 	}
 	sort.Slice(groups, func(i, j int) bool { return groups[i].name < groups[j].name })
-	return &duplicatesView{groups: groups}
+
+	// providers present among the duplicate groups (for the `t` filter)
+	present := map[provider.Kind]bool{}
+	for _, g := range groups {
+		present[g.provider] = true
+	}
+	var cycle []provider.Kind
+	for _, k := range groupOrder {
+		if present[k] {
+			cycle = append(cycle, k)
+		}
+	}
+	return &duplicatesView{groups: groups, provCycle: cycle}
 }
 
-func (v *duplicatesView) Init() tea.Cmd   { return nil }
-func (v *duplicatesView) Title() string   { return fmt.Sprintf("duplicates · %d groups", len(v.groups)) }
+func (v *duplicatesView) Init() tea.Cmd { return nil }
+
+func (v *duplicatesView) Title() string {
+	base := fmt.Sprintf("duplicates · %d groups", len(v.groups))
+	if v.provSel > 0 && v.provSel-1 < len(v.provCycle) {
+		base += " · " + provider.Meta(v.provCycle[v.provSel-1]).Name
+	}
+	return base
+}
+
 func (v *duplicatesView) Absorbing() bool { return false }
 
 func (v *duplicatesView) Update(msg tea.Msg) (view, tea.Cmd) {
@@ -64,12 +90,17 @@ func (v *duplicatesView) Update(msg tea.Msg) (view, tea.Cmd) {
 		v.rebuild()
 		return v, nil
 	case tea.KeyMsg:
-		if msg.String() == "enter" && len(v.groups) > 0 {
-			i := v.tbl.Cursor()
-			if i >= 0 && i < len(v.groups) {
-				g := v.groups[i]
-				return v, func() tea.Msg { return pushViewMsg{newDupGroupView(g)} }
+		switch msg.String() {
+		case "t":
+			v.provSel = (v.provSel + 1) % (len(v.provCycle) + 1)
+			v.rebuild()
+			return v, nil
+		case "enter":
+			if g := v.currentGroup(); g != nil {
+				gg := *g
+				return v, func() tea.Msg { return pushViewMsg{newDupGroupView(gg)} }
 			}
+			return v, nil
 		}
 		if t, handled := applyFastTableScroll(v.tbl, msg); handled {
 			v.tbl = t
@@ -80,6 +111,14 @@ func (v *duplicatesView) Update(msg tea.Msg) (view, tea.Cmd) {
 		return v, cmd
 	}
 	return v, nil
+}
+
+func (v *duplicatesView) currentGroup() *dupGroup {
+	i := v.tbl.Cursor()
+	if i < 0 || i >= len(v.filtered) {
+		return nil
+	}
+	return &v.groups[v.filtered[i]]
 }
 
 func (v *duplicatesView) View(width, height int) string {
@@ -105,8 +144,17 @@ func (v *duplicatesView) rebuild() {
 		{Title: "TYPE", Width: wType},
 		{Title: "REMOTE", Width: wRemote},
 	}
-	rows := make([]table.Row, 0, len(v.groups))
-	for _, g := range v.groups {
+	v.filtered = v.filtered[:0]
+	for i, g := range v.groups {
+		if v.provSel > 0 && v.provSel-1 < len(v.provCycle) && g.provider != v.provCycle[v.provSel-1] {
+			continue
+		}
+		v.filtered = append(v.filtered, i)
+	}
+
+	rows := make([]table.Row, 0, len(v.filtered))
+	for _, i := range v.filtered {
+		g := v.groups[i]
 		rows = append(rows, table.Row{
 			g.name, fmt.Sprintf("%d", len(g.repos)),
 			provider.Meta(g.provider).Name, g.remote,
@@ -130,6 +178,7 @@ func (v *duplicatesView) rebuild() {
 func (v *duplicatesView) ShortHelp() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "see paths")),
+		keyTypeFilter,
 		keys.Back,
 	}
 }
