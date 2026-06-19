@@ -12,13 +12,34 @@ import (
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/dutraph/repofleet/internal/api"
 	"github.com/dutraph/repofleet/internal/config"
 	"github.com/dutraph/repofleet/internal/gitops"
 	"github.com/dutraph/repofleet/internal/provider"
 	"github.com/dutraph/repofleet/internal/scanner"
+	"github.com/dutraph/repofleet/internal/theme"
 )
+
+// protoChip renders one protocol option as a bordered box. The active
+// one gets a solid accent fill; the inactive one is dimmed. Both share
+// the same border so they line up when joined horizontally.
+func protoChip(label string, active bool) string {
+	st := lipgloss.NewStyle().Padding(0, 2).Border(lipgloss.RoundedBorder())
+	if active {
+		return st.
+			Foreground(theme.ColorBg).
+			Background(theme.ColorPrimary).
+			BorderForeground(theme.ColorPrimary).
+			Bold(true).
+			Render("● " + label)
+	}
+	return st.
+		Foreground(theme.ColorMuted).
+		BorderForeground(theme.ColorBorder).
+		Render("○ " + label)
+}
 
 // ───────────────────────── account picker ─────────────────────────
 
@@ -331,6 +352,8 @@ type clonePathView struct {
 	repo     api.RemoteRepo
 	dupPaths []string
 	input    textinput.Model
+	protocol string // "https" or "ssh"
+	hasSSH   bool
 	w, h     int
 }
 
@@ -351,7 +374,29 @@ func newClonePathView(cfg *config.Config, repo api.RemoteRepo, local []scanner.R
 	in.CursorEnd()
 	in.Focus()
 	in.Width = 60
-	return &clonePathView{cfg: cfg, repo: repo, dupPaths: dups, input: in}
+
+	// Default to HTTPS, but fall back to whichever protocol the API
+	// actually returned a URL for.
+	protocol := "https"
+	if repo.CloneURL == "" && repo.SSHURL != "" {
+		protocol = "ssh"
+	}
+	return &clonePathView{
+		cfg: cfg, repo: repo, dupPaths: dups, input: in,
+		protocol: protocol, hasSSH: repo.SSHURL != "",
+	}
+}
+
+// toggleProtocol flips between https and ssh when both are available.
+func (v *clonePathView) toggleProtocol() {
+	if !v.hasSSH || v.repo.CloneURL == "" {
+		return // only one protocol available — nothing to toggle
+	}
+	if v.protocol == "https" {
+		v.protocol = "ssh"
+	} else {
+		v.protocol = "https"
+	}
 }
 
 func (v *clonePathView) Init() tea.Cmd   { return textinput.Blink }
@@ -367,6 +412,9 @@ func (v *clonePathView) Update(msg tea.Msg) (view, tea.Cmd) {
 		switch msg.String() {
 		case "esc":
 			return v, func() tea.Msg { return popViewMsg{} }
+		case "tab", "shift+tab", "ctrl+t":
+			v.toggleProtocol()
+			return v, nil
 		case "enter":
 			dest := expandHome(strings.TrimSpace(v.input.Value()))
 			if dest == "" {
@@ -375,7 +423,10 @@ func (v *clonePathView) Update(msg tea.Msg) (view, tea.Cmd) {
 			if gitops.DestExists(dest) {
 				return v, fail(fmt.Errorf("%s already exists and is not empty", dest))
 			}
-			url := v.repo.CloneURLFor("https")
+			url := v.repo.CloneURLFor(v.protocol)
+			if url == "" {
+				return v, fail(fmt.Errorf("no %s url available for this repo", v.protocol))
+			}
 			// Switch back to a fresh home view so the post-clone
 			// cloneDoneMsg lands on the repo list (which rescans).
 			return v, tea.Batch(
@@ -394,9 +445,23 @@ func (v *clonePathView) View(width, height int) string {
 	var b strings.Builder
 	b.WriteString("\n  cloning ")
 	b.WriteString(v.repo.FullName)
-	b.WriteString("\n  url: ")
-	b.WriteString(v.repo.CloneURLFor("https"))
 	b.WriteString("\n\n")
+
+	// Protocol selector — highlighted chips, active one filled.
+	hint := ""
+	if v.hasSSH && v.repo.CloneURL != "" {
+		hint = theme.Faint.Render("   tab ⇄ switch")
+	}
+	b.WriteString("  choose clone protocol:" + hint + "\n\n")
+	chips := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		protoChip("HTTPS", v.protocol == "https"),
+		"   ",
+		protoChip("SSH", v.protocol == "ssh"),
+	)
+	b.WriteString(lipgloss.NewStyle().PaddingLeft(2).Render(chips))
+	url := lipgloss.NewStyle().Foreground(theme.ColorPrimary).Render(v.repo.CloneURLFor(v.protocol))
+	b.WriteString("\n\n  " + theme.Faint.Render("url:") + " " + url + "\n\n")
 
 	if len(v.dupPaths) > 0 {
 		b.WriteString("  ⚠ this repository is already cloned locally at:\n")
@@ -409,13 +474,14 @@ func (v *clonePathView) View(width, height int) string {
 	b.WriteString("  clone into:\n  ")
 	b.WriteString(v.input.View())
 	b.WriteString("\n\n  ")
-	b.WriteString("enter = clone   esc = cancel")
+	b.WriteString("enter = clone   tab = protocol   esc = cancel")
 	return padView(b.String(), width)
 }
 
 func (v *clonePathView) ShortHelp() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "clone")),
+		key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "https/ssh")),
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 	}
 }
