@@ -311,6 +311,8 @@ func (v *repoListView) Update(msg tea.Msg) (view, tea.Cmd) {
 				return v, func() tea.Msg { return pushViewMsg{newDetailView(*r)} }
 			}
 			return v, nil
+		case key.Matches(msg, keyDuplicates):
+			return v, func() tea.Msg { return pushViewMsg{newDuplicatesView(v.repos)} }
 		case key.Matches(msg, keys.Remote):
 			return v, func() tea.Msg { return pushViewMsg{newAccountView(v.cfg, v.repos)} }
 		case key.Matches(msg, keys.Refresh):
@@ -549,6 +551,7 @@ var (
 	keyFilter     = key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search"))
 	keyTypeFilter = key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "filter by type"))
 	keyCmd        = key.NewBinding(key.WithKeys(":"), key.WithHelp(":", "git command"))
+	keyDuplicates = key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "duplicates"))
 )
 
 func (v *repoListView) ShortHelp() []key.Binding {
@@ -559,6 +562,6 @@ func (v *repoListView) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{keyFilter, keyTypeFilter, keyCmd, keyToggle, keySelectAll, keyDetail},
 		{keyPull, keyPullPrune, keyFetch, keyFetchAll},
-		{keyBranch, keyDelete, keys.Remote, keys.Refresh},
+		{keyBranch, keyDelete, keyDuplicates, keys.Remote, keys.Refresh},
 	}
 }

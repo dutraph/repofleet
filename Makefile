@@ -48,27 +48,27 @@ install:
 	[ -n "$$current" ] || current="0.0.0"; \
 	if [ -n "$(VERSION)" ]; then \
 		new="$(VERSION)"; \
-		echo "Setting version: $$current → $$new"; \
+		echo "Setting version: $$current -> $$new" >&2; \
 	else \
 		new=$$(echo "$$current" | awk -F. '{ \
 			if (NF != 3) { print "ERR" } \
 			else { printf "%d.%d.%d", $$1, $$2, $$3 + 1 } \
 		}'); \
 		if [ "$$new" = "ERR" ]; then \
-			echo "ERROR: $(VERSION_FILE) has an unexpected value ($$current). Expected MAJOR.MINOR.PATCH."; \
-			echo "Fix it manually, then re-run, e.g. \`echo 0.1.0 > $(VERSION_FILE)\`."; \
+			echo "ERROR: $(VERSION_FILE) has an unexpected value ($$current). Expected MAJOR.MINOR.PATCH." >&2; \
+			echo "Fix it manually, then re-run, e.g. \`echo 0.1.0 > $(VERSION_FILE)\`." >&2; \
 			exit 1; \
 		fi; \
-		echo "Bumping patch:  $$current → $$new"; \
+		echo "Bumping patch:  $$current -> $$new" >&2; \
 	fi; \
-	echo "$$new" > $(VERSION_FILE); \
-	echo "Building $(BIN) v$$new..."; \
+	printf '%s\n' "$$new" > $(VERSION_FILE).tmp && mv $(VERSION_FILE).tmp $(VERSION_FILE); \
+	echo "Building $(BIN) v$$new..." >&2; \
 	go build -ldflags '$(STRIP_LD) -X github.com/dutraph/repofleet/internal/version.Version='"$$new" -o $(BIN) $(PKG); \
 	install -d $(DESTDIR)$(BINDIR); \
 	install -m 0755 $(BIN) $(DESTDIR)$(BINDIR)/$(BIN); \
-	echo ""; \
-	echo "Installed $(BIN) v$$new → $(DESTDIR)$(BINDIR)/$(BIN)"; \
-	echo "Reminder: commit $(VERSION_FILE) so the bump sticks in git."
+	echo "" >&2; \
+	echo "Installed $(BIN) v$$new -> $(DESTDIR)$(BINDIR)/$(BIN)" >&2; \
+	echo "Reminder: commit $(VERSION_FILE) so the bump sticks in git." >&2
 
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/$(BIN)

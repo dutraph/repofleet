@@ -80,7 +80,7 @@ fleet accounts        # lista as contas configuradas (★ = ativa)
 fleet switch <nome>   # troca a conta ativa
 ```
 
-Atalhos na TUI: `espaço` selecionar · `a` todos · `p` pull · `P` pull --prune · `f` fetch · `F` fetch all (sync) · `b` trocar branch · `d` remover · `t` filtrar por tipo · `/` buscar · `c` clonar do servidor · `enter` detalhes · `r` rescan · `?` ajuda · `q` sair.
+Atalhos na TUI: `espaço` selecionar · `a` todos · `p` pull · `P` pull --prune · `f` fetch · `F` fetch all (sync) · `b` trocar branch · `d` remover · `D` duplicados · `t` filtrar por tipo · `/` buscar · `:` comando git · `c` clonar do servidor · `enter` detalhes · `r` rescan · `?` ajuda · `q` sair.
 
 Os diretórios varridos ficam em `scan_roots` no config (`~/.config/repos/config.yaml`); por padrão é o seu `$HOME`.
 
@@ -150,7 +150,7 @@ fleet accounts        # list configured accounts (★ = active)
 fleet switch <name>   # switch the active account
 ```
 
-TUI keys: `space` select · `a` all · `p` pull · `P` pull --prune · `f` fetch · `F` fetch all (sync) · `b` switch branch · `d` remove · `t` filter by type · `/` search · `c` clone from server · `enter` details · `r` rescan · `?` help · `q` quit.
+TUI keys: `space` select · `a` all · `p` pull · `P` pull --prune · `f` fetch · `F` fetch all (sync) · `b` switch branch · `d` remove · `D` duplicates · `t` filter by type · `/` search · `:` git command · `c` clone from server · `enter` details · `r` rescan · `?` help · `q` quit.
 
 Scanned directories live under `scan_roots` in the config (`~/.config/repos/config.yaml`); defaults to your `$HOME`.
 
@@ -220,7 +220,7 @@ fleet accounts        # lista las cuentas configuradas (★ = activa)
 fleet switch <nombre> # cambia la cuenta activa
 ```
 
-Atajos en la TUI: `espacio` seleccionar · `a` todos · `p` pull · `P` pull --prune · `f` fetch · `F` fetch all (sync) · `b` cambiar branch · `d` eliminar · `t` filtrar por tipo · `/` buscar · `c` clonar del servidor · `enter` detalles · `r` rescan · `?` ayuda · `q` salir.
+Atajos en la TUI: `espacio` seleccionar · `a` todos · `p` pull · `P` pull --prune · `f` fetch · `F` fetch all (sync) · `b` cambiar branch · `d` eliminar · `D` duplicados · `t` filtrar por tipo · `/` buscar · `:` comando git · `c` clonar del servidor · `enter` detalles · `r` rescan · `?` ayuda · `q` salir.
 
 Los directorios escaneados están en `scan_roots` del config (`~/.config/repos/config.yaml`); por defecto tu `$HOME`.
 

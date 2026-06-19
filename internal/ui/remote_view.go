@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -347,50 +348,73 @@ func (v *remoteListView) FullHelp() [][]key.Binding { return [][]key.Binding{v.S
 
 // ──────────────────────── clone destination ────────────────────────
 
+// browse item kinds.
+const (
+	itemClone = iota // confirm: clone into the current directory
+	itemUp           // ".." — go to parent
+	itemDir          // a subdirectory to descend into
+)
+
+type browseItem struct {
+	kind int
+	name string // subdir name (for itemDir)
+}
+
+// clonePathView is a filesystem browser: the user navigates directories
+// with a live filter (type to narrow, ↑/↓ to move, Enter to descend),
+// picks where to drop the clone, and toggles HTTPS/SSH with Tab.
 type clonePathView struct {
 	cfg      *config.Config
 	repo     api.RemoteRepo
 	dupPaths []string
-	input    textinput.Model
 	protocol string // "https" or "ssh"
 	hasSSH   bool
-	w, h     int
+
+	dir     string   // directory currently being browsed
+	entries []string // subdir names of dir (unfiltered)
+	items   []browseItem
+	filter  textinput.Model
+	tbl     table.Model
+	w, h    int
+	built   bool
 }
 
 func newClonePathView(cfg *config.Config, repo api.RemoteRepo, local []scanner.Repo) *clonePathView {
 	dups := scanner.FindByKey(local, provider.Normalize(repo.CloneURL))
 
-	root := ""
+	start := ""
 	if len(cfg.ScanRoots) > 0 {
-		root = cfg.ScanRoots[0]
-	} else if home, err := os.UserHomeDir(); err == nil {
-		root = home
+		start = expandHome(cfg.ScanRoots[0])
 	}
-	def := filepath.Join(root, repo.Name)
+	if start == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			start = home
+		} else {
+			start = "/"
+		}
+	}
 
-	in := textinput.New()
-	in.Prompt = "› "
-	in.SetValue(def)
-	in.CursorEnd()
-	in.Focus()
-	in.Width = 60
+	fi := textinput.New()
+	fi.Prompt = "find: "
+	fi.Placeholder = "type to filter folders…"
+	fi.Focus()
 
-	// Default to HTTPS, but fall back to whichever protocol the API
-	// actually returned a URL for.
 	protocol := "https"
 	if repo.CloneURL == "" && repo.SSHURL != "" {
 		protocol = "ssh"
 	}
-	return &clonePathView{
-		cfg: cfg, repo: repo, dupPaths: dups, input: in,
+	v := &clonePathView{
+		cfg: cfg, repo: repo, dupPaths: dups,
 		protocol: protocol, hasSSH: repo.SSHURL != "",
+		dir: filepath.Clean(start), filter: fi,
 	}
+	v.loadDir()
+	return v
 }
 
-// toggleProtocol flips between https and ssh when both are available.
 func (v *clonePathView) toggleProtocol() {
 	if !v.hasSSH || v.repo.CloneURL == "" {
-		return // only one protocol available — nothing to toggle
+		return
 	}
 	if v.protocol == "https" {
 		v.protocol = "ssh"
@@ -398,6 +422,34 @@ func (v *clonePathView) toggleProtocol() {
 		v.protocol = "https"
 	}
 }
+
+// loadDir reads the subdirectories of v.dir.
+func (v *clonePathView) loadDir() {
+	v.entries = v.entries[:0]
+	ents, err := os.ReadDir(v.dir)
+	if err == nil {
+		for _, e := range ents {
+			if e.IsDir() {
+				v.entries = append(v.entries, e.Name())
+			}
+		}
+		sort.Slice(v.entries, func(i, j int) bool {
+			return strings.ToLower(v.entries[i]) < strings.ToLower(v.entries[j])
+		})
+	}
+}
+
+// setDir navigates to d, clearing the filter and reloading entries.
+func (v *clonePathView) setDir(d string) {
+	v.dir = filepath.Clean(d)
+	v.filter.SetValue("")
+	v.loadDir()
+	v.rebuild()
+	v.tbl.SetCursor(0)
+}
+
+// dest is where the repo would be cloned: <current dir>/<repo name>.
+func (v *clonePathView) dest() string { return filepath.Join(v.dir, v.repo.Name) }
 
 func (v *clonePathView) Init() tea.Cmd   { return textinput.Blink }
 func (v *clonePathView) Title() string   { return "clone · " + v.repo.Name }
@@ -407,6 +459,7 @@ func (v *clonePathView) Update(msg tea.Msg) (view, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		v.w, v.h = msg.Width, msg.Height
+		v.rebuild()
 		return v, nil
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -416,71 +469,156 @@ func (v *clonePathView) Update(msg tea.Msg) (view, tea.Cmd) {
 			v.toggleProtocol()
 			return v, nil
 		case "enter":
-			dest := expandHome(strings.TrimSpace(v.input.Value()))
-			if dest == "" {
-				return v, fail(fmt.Errorf("destination path is empty"))
+			return v.activate()
+		case "up", "down", "pgup", "pgdown", "ctrl+u", "ctrl+d":
+			var cmd tea.Cmd
+			v.tbl, cmd = v.tbl.Update(msg)
+			return v, cmd
+		case "left":
+			if parent := filepath.Dir(v.dir); parent != v.dir {
+				v.setDir(parent)
 			}
-			if gitops.DestExists(dest) {
-				return v, fail(fmt.Errorf("%s already exists and is not empty", dest))
+			return v, nil
+		case "right":
+			if it := v.currentItem(); it != nil && it.kind == itemDir {
+				v.setDir(filepath.Join(v.dir, it.name))
 			}
-			url := v.repo.CloneURLFor(v.protocol)
-			if url == "" {
-				return v, fail(fmt.Errorf("no %s url available for this repo", v.protocol))
-			}
-			// Switch back to a fresh home view so the post-clone
-			// cloneDoneMsg lands on the repo list (which rescans).
-			return v, tea.Batch(
-				func() tea.Msg { return execCloneMsg{url: url, dest: dest} },
-				func() tea.Msg { return switchViewMsg{newRepoListView(v.cfg)} },
-			)
+			return v, nil
 		}
+		// anything else edits the filter
 		var cmd tea.Cmd
-		v.input, cmd = v.input.Update(msg)
+		v.filter, cmd = v.filter.Update(msg)
+		v.rebuild()
 		return v, cmd
 	}
 	return v, nil
 }
 
+func (v *clonePathView) currentItem() *browseItem {
+	i := v.tbl.Cursor()
+	if i < 0 || i >= len(v.items) {
+		return nil
+	}
+	return &v.items[i]
+}
+
+// activate handles Enter on the selected row.
+func (v *clonePathView) activate() (view, tea.Cmd) {
+	it := v.currentItem()
+	if it == nil {
+		return v, nil
+	}
+	switch it.kind {
+	case itemUp:
+		if parent := filepath.Dir(v.dir); parent != v.dir {
+			v.setDir(parent)
+		}
+		return v, nil
+	case itemDir:
+		v.setDir(filepath.Join(v.dir, it.name))
+		return v, nil
+	default: // itemClone
+		dest := v.dest()
+		if gitops.DestExists(dest) {
+			return v, fail(fmt.Errorf("%s already exists and is not empty", dest))
+		}
+		url := v.repo.CloneURLFor(v.protocol)
+		if url == "" {
+			return v, fail(fmt.Errorf("no %s url available for this repo", v.protocol))
+		}
+		return v, tea.Batch(
+			func() tea.Msg { return execCloneMsg{url: url, dest: dest} },
+			func() tea.Msg { return switchViewMsg{newRepoListView(v.cfg)} },
+		)
+	}
+}
+
+func (v *clonePathView) rebuild() {
+	if v.w == 0 {
+		v.w = 100
+	}
+	q := strings.ToLower(strings.TrimSpace(v.filter.Value()))
+
+	v.items = v.items[:0]
+	v.items = append(v.items, browseItem{kind: itemClone})
+	if parent := filepath.Dir(v.dir); parent != v.dir {
+		v.items = append(v.items, browseItem{kind: itemUp})
+	}
+	for _, name := range v.entries {
+		if q == "" || strings.Contains(strings.ToLower(name), q) {
+			v.items = append(v.items, browseItem{kind: itemDir, name: name})
+		}
+	}
+
+	col := []table.Column{{Title: "FOLDER", Width: v.w - cellPadding - 2}}
+	if col[0].Width < 20 {
+		col[0].Width = 20
+	}
+	rows := make([]table.Row, 0, len(v.items))
+	for _, it := range v.items {
+		switch it.kind {
+		case itemClone:
+			rows = append(rows, table.Row{" clone here → " + filepath.Base(v.dest()) + "/"})
+		case itemUp:
+			rows = append(rows, table.Row{" .."})
+		default:
+			rows = append(rows, table.Row{"  " + it.name + "/"})
+		}
+	}
+
+	height := v.h - 12
+	if len(v.dupPaths) > 0 {
+		height -= len(v.dupPaths) + 2
+	}
+	if height < 3 {
+		height = 3
+	}
+	cursor := 0
+	if v.built {
+		cursor = v.tbl.Cursor()
+	}
+	v.tbl = newStyledTable(col, rows, height)
+	v.built = true
+	if cursor >= 0 && cursor < len(rows) {
+		v.tbl.SetCursor(cursor)
+	}
+}
+
 func (v *clonePathView) View(width, height int) string {
 	var b strings.Builder
-	b.WriteString("\n  cloning ")
-	b.WriteString(v.repo.FullName)
-	b.WriteString("\n\n")
+	b.WriteString("\n  cloning " + v.repo.FullName + "\n\n")
 
-	// Protocol selector — highlighted chips, active one filled.
+	// Protocol chips.
 	hint := ""
 	if v.hasSSH && v.repo.CloneURL != "" {
 		hint = theme.Faint.Render("   tab ⇄ switch")
 	}
-	b.WriteString("  choose clone protocol:" + hint + "\n\n")
-	chips := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		protoChip("HTTPS", v.protocol == "https"),
-		"   ",
-		protoChip("SSH", v.protocol == "ssh"),
-	)
-	b.WriteString(lipgloss.NewStyle().PaddingLeft(2).Render(chips))
-	url := lipgloss.NewStyle().Foreground(theme.ColorPrimary).Render(v.repo.CloneURLFor(v.protocol))
-	b.WriteString("\n\n  " + theme.Faint.Render("url:") + " " + url + "\n\n")
+	b.WriteString("  protocol:" + hint + "\n  ")
+	chips := lipgloss.JoinHorizontal(lipgloss.Top,
+		protoChip("HTTPS", v.protocol == "https"), "  ", protoChip("SSH", v.protocol == "ssh"))
+	b.WriteString(chips + "\n")
 
 	if len(v.dupPaths) > 0 {
-		b.WriteString("  ⚠ this repository is already cloned locally at:\n")
+		b.WriteString("\n  ⚠ already cloned at:\n")
 		for _, p := range v.dupPaths {
 			b.WriteString("      " + shortenPath(p) + "\n")
 		}
-		b.WriteString("  cloning again will create a duplicate.\n\n")
 	}
 
-	b.WriteString("  clone into:\n  ")
-	b.WriteString(v.input.View())
-	b.WriteString("\n\n  ")
-	b.WriteString("enter = clone   tab = protocol   esc = cancel")
+	// Destination preview + folder browser.
+	b.WriteString("\n  target: " +
+		lipgloss.NewStyle().Foreground(theme.ColorPrimary).Render(shortenPath(v.dest())) + "\n")
+	b.WriteString("  " + theme.Faint.Render(shortenPath(v.dir)) + "\n")
+	b.WriteString("  " + v.filter.View() + "\n")
+	b.WriteString(v.tbl.View())
+	b.WriteString("\n  " + theme.Faint.Render("↑↓ move · → enter folder · ← up · enter = act · tab = protocol · esc = cancel"))
 	return padView(b.String(), width)
 }
 
 func (v *clonePathView) ShortHelp() []key.Binding {
 	return []key.Binding{
-		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "clone")),
+		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open/clone")),
+		key.NewBinding(key.WithKeys("→"), key.WithHelp("→", "enter folder")),
 		key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "https/ssh")),
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 	}
