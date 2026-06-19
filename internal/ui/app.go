@@ -5,6 +5,7 @@
 package ui
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -16,8 +17,27 @@ import (
 	"github.com/dutraph/repofleet/internal/config"
 	"github.com/dutraph/repofleet/internal/gitops"
 	"github.com/dutraph/repofleet/internal/theme"
+	"github.com/dutraph/repofleet/internal/update"
 	"github.com/dutraph/repofleet/internal/version"
 )
+
+// updateMsg carries the result of the startup update check.
+type updateMsg struct{ latest string }
+
+// checkUpdateCmd asks GitHub for the latest release in the background.
+// It only emits a message when a strictly newer version exists, so the
+// header note never appears on the current (or a dev) build.
+func checkUpdateCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		latest, err := update.Latest(ctx)
+		if err != nil || !update.Newer(latest, version.Version) {
+			return nil
+		}
+		return updateMsg{latest: latest}
+	}
+}
 
 // repoSelector is implemented by any view that has a single "current"
 // repo. The root model uses it so the `:` git command bar works from
@@ -43,6 +63,7 @@ type Model struct {
 	cmdPath string
 	cmdName string
 
+	latest   string // newer release tag, "" when up to date
 	showHelp bool
 	quitting bool
 }
@@ -61,7 +82,9 @@ func New(cfg *config.Config) Model {
 
 func (m Model) top() view { return m.stack[len(m.stack)-1] }
 
-func (m Model) Init() tea.Cmd { return m.top().Init() }
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(m.top().Init(), checkUpdateCmd())
+}
 
 // Update is the root reducer. It intercepts global keys + stack/toast
 // control messages, and forwards everything else to the active view.
@@ -159,6 +182,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case updateMsg:
+		m.latest = msg.latest
+		return m, nil
+
 	case errMsg:
 		m.toast = "⚠ " + msg.Error()
 		m.toastUntil = time.Now().Add(5 * time.Second)
@@ -235,7 +262,15 @@ func (m Model) View() string {
 }
 
 func (m Model) headerBar() string {
-	left := theme.Logo.Render(" ▲ fleet ") + theme.Faint.Render(version.String())
+	left := theme.Logo.Render(" ▲ fleet ")
+	if m.latest != "" {
+		// Outdated: current (yellow) ~> latest (green).
+		cur := lipgloss.NewStyle().Foreground(theme.ColorWarning).Render(version.String())
+		lat := lipgloss.NewStyle().Foreground(theme.ColorSuccess).Bold(true).Render("v" + m.latest)
+		left += cur + theme.Faint.Render(" ~> ") + lat
+	} else {
+		left += theme.Faint.Render(version.String())
+	}
 	title := theme.Title.Render(" " + m.top().Title() + " ")
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(title)
 	if gap < 1 {
