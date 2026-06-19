@@ -1,6 +1,6 @@
 # Binaries
-/repos
-/repos.exe
+/fleet
+/fleet.exe
 /bin/
 /dist/
 *.test
@@ -31,8 +31,8 @@ Thumbs.db
 
 # ---------------------------------------------------------------------
 # Secrets / local credentials — these MUST never be committed.
-# The on-disk config lives in $XDG_CONFIG_HOME/repos/config.yaml on
-# Linux and ~/Library/Application Support/repos/config.yaml on macOS,
+# The on-disk config lives in $XDG_CONFIG_HOME/fleet/config.yaml on
+# Linux and ~/Library/Application Support/fleet/config.yaml on macOS,
 # but the patterns below catch the failure mode where someone runs the
 # tool from the repo root with $XDG_CONFIG_HOME unset, or drops a
 # private YAML next to the source for testing.
@@ -43,8 +43,8 @@ Thumbs.db
 config.yaml
 config.yml
 config.local.*
-repos.yaml
-repos.yml
+fleet.yaml
+fleet.yml
 *.pat
 *.token
 *.secret
@@ -52,8 +52,8 @@ repos.yml
 secrets/
 credentials
 credentials.*
-.repos/
-.repos-config*
+.fleet/
+.fleet-config*
 .netrc
 
 # Anything obviously labelled "local" by the user
