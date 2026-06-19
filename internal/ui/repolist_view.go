@@ -15,7 +15,6 @@ import (
 	"github.com/dutraph/repofleet/internal/gitops"
 	"github.com/dutraph/repofleet/internal/provider"
 	"github.com/dutraph/repofleet/internal/scanner"
-	"github.com/dutraph/repofleet/internal/theme"
 )
 
 // repoListView is the home screen: every local git repo found on disk,
@@ -30,9 +29,6 @@ type repoListView struct {
 
 	filter    textinput.Model
 	filtering bool
-
-	cmdBar  textinput.Model // `:` git command bar
-	cmdMode bool
 
 	// provider filter: provSel 0 = all; otherwise provCycle[provSel-1].
 	provCycle []provider.Kind
@@ -56,16 +52,11 @@ func newRepoListView(cfg *config.Config) *repoListView {
 	fi.Placeholder = "filter by name, path or provider…"
 	fi.Prompt = "/"
 
-	cb := textinput.New()
-	cb.Placeholder = "git command, e.g. log --oneline -10  (runs on the selected repo)"
-	cb.Prompt = ":git "
-
 	return &repoListView{
 		cfg:      cfg,
 		statuses: map[string]gitops.Status{},
 		selected: map[string]bool{},
 		filter:   fi,
-		cmdBar:   cb,
 		loading:  true,
 	}
 }
@@ -144,7 +135,15 @@ func (v *repoListView) Title() string {
 	return base
 }
 
-func (v *repoListView) Absorbing() bool { return v.filtering || v.cmdMode }
+func (v *repoListView) Absorbing() bool { return v.filtering }
+
+// SelectedRepo lets the root `:` command bar target the cursor repo.
+func (v *repoListView) SelectedRepo() (string, string, bool) {
+	if r := v.current(); r != nil {
+		return r.Path, r.Name, true
+	}
+	return "", "", false
+}
 
 func (v *repoListView) Update(msg tea.Msg) (view, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -196,45 +195,10 @@ func (v *repoListView) Update(msg tea.Msg) (view, tea.Cmd) {
 		return v, tea.Batch(toast("cloned → "+msg.dest), scanCmd(v.cfg.ScanRoots))
 
 	case gitExecDoneMsg:
-		word := "done"
-		if msg.err != nil {
-			word = "exited non-zero"
-		}
-		return v, tea.Batch(
-			toast(fmt.Sprintf("git %s: %s", msg.args, word)),
-			statusCmd(msg.path),
-		)
+		// Root shows the toast; we just refresh this repo's status.
+		return v, statusCmd(msg.path)
 
 	case tea.KeyMsg:
-		// `:` git command bar — runs an arbitrary git command on the
-		// selected repo via a real subprocess (interactive-friendly).
-		if v.cmdMode {
-			switch msg.String() {
-			case "esc":
-				v.cmdMode = false
-				v.cmdBar.Blur()
-				v.cmdBar.SetValue("")
-				v.rebuild()
-				return v, nil
-			case "enter":
-				raw := strings.TrimSpace(v.cmdBar.Value())
-				raw = strings.TrimPrefix(raw, "git ")
-				v.cmdMode = false
-				v.cmdBar.Blur()
-				v.cmdBar.SetValue("")
-				v.rebuild()
-				r := v.current()
-				if raw == "" || r == nil {
-					return v, nil
-				}
-				path := r.Path
-				return v, func() tea.Msg { return execGitMsg{path: path, args: raw} }
-			}
-			var cmd tea.Cmd
-			v.cmdBar, cmd = v.cmdBar.Update(msg)
-			return v, cmd
-		}
-
 		if v.filtering {
 			switch msg.String() {
 			case "esc":
@@ -255,14 +219,6 @@ func (v *repoListView) Update(msg tea.Msg) (view, tea.Cmd) {
 		}
 
 		switch {
-		case key.Matches(msg, keyCmd):
-			if v.current() == nil {
-				return v, toast("select a repo first")
-			}
-			v.cmdMode = true
-			v.cmdBar.Focus()
-			v.rebuild()
-			return v, textinput.Blink
 		case key.Matches(msg, keyFilter):
 			v.filtering = true
 			v.filter.Focus()
@@ -340,14 +296,7 @@ func (v *repoListView) View(width, height int) string {
 			"\n\n  edit scan_roots in the config, then press r to rescan.", width)
 	}
 	body := v.tbl.View()
-	switch {
-	case v.cmdMode:
-		hint := ""
-		if r := v.current(); r != nil {
-			hint = "  " + theme.Faint.Render("→ "+r.Name)
-		}
-		body = v.cmdBar.View() + hint + "\n" + body
-	case v.filtering || v.filter.Value() != "":
+	if v.filtering || v.filter.Value() != "" {
 		body = v.filter.View() + "\n" + body
 	}
 	return padView(body, width)
@@ -511,7 +460,7 @@ func (v *repoListView) rebuild() {
 	}
 
 	height := v.h - 4
-	if v.filterShown() || v.cmdMode {
+	if v.filterShown() {
 		height--
 	}
 	if height < 3 {

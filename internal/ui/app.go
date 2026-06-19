@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -17,6 +18,13 @@ import (
 	"github.com/dutraph/repofleet/internal/theme"
 	"github.com/dutraph/repofleet/internal/version"
 )
+
+// repoSelector is implemented by any view that has a single "current"
+// repo. The root model uses it so the `:` git command bar works from
+// any such screen (the list, a duplicate group, the detail pane).
+type repoSelector interface {
+	SelectedRepo() (path, name string, ok bool)
+}
 
 // Model is the root Bubble Tea model.
 type Model struct {
@@ -28,15 +36,26 @@ type Model struct {
 	toast      string
 	toastUntil time.Time
 
+	// `:` git command bar (works on whatever repo the active view
+	// reports via repoSelector).
+	cmdBar  textinput.Model
+	cmdMode bool
+	cmdPath string
+	cmdName string
+
 	showHelp bool
 	quitting bool
 }
 
 // New builds the root model with the repo-list view on the stack.
 func New(cfg *config.Config) Model {
+	cb := textinput.New()
+	cb.Prompt = ":git "
+	cb.Placeholder = "command, e.g. log --oneline -10"
 	return Model{
-		cfg:   cfg,
-		stack: []view{newRepoListView(cfg)},
+		cfg:    cfg,
+		stack:  []view{newRepoListView(cfg)},
+		cmdBar: cb,
 	}
 }
 
@@ -57,7 +76,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showHelp = false
 			return m, nil
 		}
+		// `:` git command bar takes priority while active.
+		if m.cmdMode {
+			switch msg.String() {
+			case "esc":
+				m.cmdMode = false
+				m.cmdBar.Blur()
+				m.cmdBar.SetValue("")
+				return m, nil
+			case "enter":
+				raw := strings.TrimPrefix(strings.TrimSpace(m.cmdBar.Value()), "git ")
+				path := m.cmdPath
+				m.cmdMode = false
+				m.cmdBar.Blur()
+				m.cmdBar.SetValue("")
+				if raw == "" || path == "" {
+					return m, nil
+				}
+				return m, func() tea.Msg { return execGitMsg{path: path, args: raw} }
+			}
+			var cmd tea.Cmd
+			m.cmdBar, cmd = m.cmdBar.Update(msg)
+			return m, cmd
+		}
 		if !m.top().Absorbing() {
+			// `:` opens the command bar on the active view's repo.
+			if msg.String() == ":" {
+				if rs, ok := m.top().(repoSelector); ok {
+					if path, name, ok2 := rs.SelectedRepo(); ok2 {
+						m.cmdMode = true
+						m.cmdPath, m.cmdName = path, name
+						m.cmdBar.SetValue("")
+						m.cmdBar.Focus()
+						return m, textinput.Blink
+					}
+				}
+				return m, func() tea.Msg { return toastMsg{text: "select a repo first"} }
+			}
 			switch {
 			case key.Matches(msg, keys.Quit):
 				m.quitting = true
@@ -120,6 +175,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 			return gitExecDoneMsg{path: msg.path, args: msg.args, err: err}
 		})
+
+	case gitExecDoneMsg:
+		word := "done"
+		if msg.err != nil {
+			word = "exited non-zero"
+		}
+		m.toast = "git " + msg.args + ": " + word
+		m.toastUntil = time.Now().Add(3 * time.Second)
+		// Forward so the active view can refresh its status, and arm the
+		// toast-clear tick.
+		return m, tea.Batch(
+			m.forward(msg),
+			tea.Tick(3*time.Second, func(time.Time) tea.Msg { return clearToastMsg{} }),
+		)
 	}
 
 	// Everything else (scan results, status updates, git results, clone
@@ -177,6 +246,10 @@ func (m Model) headerBar() string {
 }
 
 func (m Model) footerBar() string {
+	if m.cmdMode {
+		target := theme.Faint.Render("  → " + m.cmdName)
+		return theme.CommandBar.Width(m.width).Render(m.cmdBar.View() + target)
+	}
 	if m.toast != "" {
 		return theme.Toast.Width(m.width).Render(m.toast)
 	}

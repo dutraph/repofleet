@@ -36,6 +36,11 @@ func (v *detailView) Title() string { return "details · " + v.repo.Name }
 
 func (v *detailView) Absorbing() bool { return false }
 
+// SelectedRepo lets the root `:` command bar target this repo.
+func (v *detailView) SelectedRepo() (string, string, bool) {
+	return v.repo.Path, v.repo.Name, true
+}
+
 func (v *detailView) Update(msg tea.Msg) (view, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -43,6 +48,9 @@ func (v *detailView) Update(msg tea.Msg) (view, tea.Cmd) {
 		v.vp = viewport.New(msg.Width-4, msg.Height-4)
 		v.vp.SetContent(v.render())
 		return v, nil
+	case gitExecDoneMsg:
+		// A `:` command just ran on this repo — reload the status pane.
+		return v, v.Init()
 	case detailStatusMsg:
 		out := msg.res.Output
 		if msg.res.Err != nil && out == "" {

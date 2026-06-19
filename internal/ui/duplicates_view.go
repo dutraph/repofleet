@@ -150,6 +150,17 @@ func (v *dupGroupView) Init() tea.Cmd   { return nil }
 func (v *dupGroupView) Title() string   { return "duplicate · " + v.group.name }
 func (v *dupGroupView) Absorbing() bool { return false }
 
+// SelectedRepo lets the root `:` command bar run git on the highlighted
+// duplicate copy.
+func (v *dupGroupView) SelectedRepo() (string, string, bool) {
+	i := v.tbl.Cursor()
+	if i >= 0 && i < len(v.group.repos) {
+		r := v.group.repos[i]
+		return r.Path, r.Name, true
+	}
+	return "", "", false
+}
+
 func (v *dupGroupView) Update(msg tea.Msg) (view, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
