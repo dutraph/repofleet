@@ -350,9 +350,10 @@ func (v *remoteListView) FullHelp() [][]key.Binding { return [][]key.Binding{v.S
 
 // browse item kinds.
 const (
-	itemClone = iota // confirm: clone into the current directory
-	itemUp           // ".." — go to parent
-	itemDir          // a subdirectory to descend into
+	itemClone     = iota // confirm: clone into the current directory
+	itemNewFolder        // create a new folder here
+	itemUp               // ".." — go to parent
+	itemDir              // a subdirectory to descend into
 )
 
 type browseItem struct {
@@ -374,6 +375,8 @@ type clonePathView struct {
 	entries []string // subdir names of dir (unfiltered)
 	items   []browseItem
 	filter  textinput.Model
+	newDir  textinput.Model // "new folder" name input
+	creating bool
 	tbl     table.Model
 	w, h    int
 	built   bool
@@ -399,6 +402,10 @@ func newClonePathView(cfg *config.Config, repo api.RemoteRepo, local []scanner.R
 	fi.Placeholder = "type to filter folders…"
 	fi.Focus()
 
+	nd := textinput.New()
+	nd.Prompt = "new folder: "
+	nd.Placeholder = "name"
+
 	protocol := "https"
 	if repo.CloneURL == "" && repo.SSHURL != "" {
 		protocol = "ssh"
@@ -406,10 +413,28 @@ func newClonePathView(cfg *config.Config, repo api.RemoteRepo, local []scanner.R
 	v := &clonePathView{
 		cfg: cfg, repo: repo, dupPaths: dups,
 		protocol: protocol, hasSSH: repo.SSHURL != "",
-		dir: filepath.Clean(start), filter: fi,
+		dir: filepath.Clean(start), filter: fi, newDir: nd,
 	}
 	v.loadDir()
 	return v
+}
+
+// makeFolder creates name under the current directory and navigates into
+// it. name may be a nested path (e.g. "work/clients").
+func (v *clonePathView) makeFolder(name string) (view, tea.Cmd) {
+	name = strings.TrimSpace(name)
+	v.creating = false
+	v.newDir.Blur()
+	v.newDir.SetValue("")
+	if name == "" {
+		return v, nil
+	}
+	target := filepath.Join(v.dir, name)
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		return v, fail(fmt.Errorf("create folder: %v", err))
+	}
+	v.setDir(target)
+	return v, toast("created " + name)
 }
 
 func (v *clonePathView) toggleProtocol() {
@@ -462,9 +487,28 @@ func (v *clonePathView) Update(msg tea.Msg) (view, tea.Cmd) {
 		v.rebuild()
 		return v, nil
 	case tea.KeyMsg:
+		// "new folder" name entry takes over the keyboard while active.
+		if v.creating {
+			switch msg.String() {
+			case "esc":
+				v.creating = false
+				v.newDir.Blur()
+				v.newDir.SetValue("")
+				return v, nil
+			case "enter":
+				return v.makeFolder(v.newDir.Value())
+			}
+			var cmd tea.Cmd
+			v.newDir, cmd = v.newDir.Update(msg)
+			return v, cmd
+		}
 		switch msg.String() {
 		case "esc":
 			return v, func() tea.Msg { return popViewMsg{} }
+		case "ctrl+n":
+			v.creating = true
+			v.newDir.Focus()
+			return v, textinput.Blink
 		case "tab", "shift+tab", "ctrl+t":
 			v.toggleProtocol()
 			return v, nil
@@ -509,6 +553,10 @@ func (v *clonePathView) activate() (view, tea.Cmd) {
 		return v, nil
 	}
 	switch it.kind {
+	case itemNewFolder:
+		v.creating = true
+		v.newDir.Focus()
+		return v, textinput.Blink
 	case itemUp:
 		if parent := filepath.Dir(v.dir); parent != v.dir {
 			v.setDir(parent)
@@ -541,6 +589,7 @@ func (v *clonePathView) rebuild() {
 
 	v.items = v.items[:0]
 	v.items = append(v.items, browseItem{kind: itemClone})
+	v.items = append(v.items, browseItem{kind: itemNewFolder})
 	if parent := filepath.Dir(v.dir); parent != v.dir {
 		v.items = append(v.items, browseItem{kind: itemUp})
 	}
@@ -559,6 +608,8 @@ func (v *clonePathView) rebuild() {
 		switch it.kind {
 		case itemClone:
 			rows = append(rows, table.Row{" clone here → " + filepath.Base(v.dest()) + "/"})
+		case itemNewFolder:
+			rows = append(rows, table.Row{" ＋ new folder here…"})
 		case itemUp:
 			rows = append(rows, table.Row{" .."})
 		default:
@@ -609,9 +660,15 @@ func (v *clonePathView) View(width, height int) string {
 	b.WriteString("\n  target: " +
 		lipgloss.NewStyle().Foreground(theme.ColorPrimary).Render(shortenPath(v.dest())) + "\n")
 	b.WriteString("  " + theme.Faint.Render(shortenPath(v.dir)) + "\n")
+	if v.creating {
+		b.WriteString("  " + v.newDir.View() + "\n")
+		b.WriteString(v.tbl.View())
+		b.WriteString("\n  " + theme.Faint.Render("type a name · enter = create & open · esc = cancel"))
+		return padView(b.String(), width)
+	}
 	b.WriteString("  " + v.filter.View() + "\n")
 	b.WriteString(v.tbl.View())
-	b.WriteString("\n  " + theme.Faint.Render("↑↓ move · → enter folder · ← up · enter = act · tab = protocol · esc = cancel"))
+	b.WriteString("\n  " + theme.Faint.Render("↑↓ move · → enter folder · ← up · ctrl+n new folder · enter = act · tab = protocol · esc = cancel"))
 	return padView(b.String(), width)
 }
 
@@ -619,6 +676,7 @@ func (v *clonePathView) ShortHelp() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open/clone")),
 		key.NewBinding(key.WithKeys("→"), key.WithHelp("→", "enter folder")),
+		key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl+n", "new folder")),
 		key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "https/ssh")),
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 	}
