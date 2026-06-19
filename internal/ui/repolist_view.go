@@ -119,13 +119,28 @@ func (v *repoListView) Title() string {
 	if v.loading {
 		return "scanning…"
 	}
-	dups := 0
-	for _, r := range v.repos {
-		if r.IsDuplicate() {
-			dups++
+	// Counts reflect the active filter (provider + search). v.filtered is
+	// the currently-shown subset; it equals all repos when no filter is on.
+	idx := v.filtered
+	if !v.built {
+		idx = nil // before the first rebuild, fall back to totals below
+	}
+	found, dups := len(v.repos), 0
+	if v.built {
+		found = len(idx)
+		for _, i := range idx {
+			if v.repos[i].IsDuplicate() {
+				dups++
+			}
+		}
+	} else {
+		for _, r := range v.repos {
+			if r.IsDuplicate() {
+				dups++
+			}
 		}
 	}
-	base := fmt.Sprintf("repos · %d found · %d dup", len(v.repos), dups)
+	base := fmt.Sprintf("repos · %d found · %d dup", found, dups)
 	if v.provSel > 0 && v.provSel-1 < len(v.provCycle) {
 		base += " · " + provider.Meta(v.provCycle[v.provSel-1]).Name
 	}

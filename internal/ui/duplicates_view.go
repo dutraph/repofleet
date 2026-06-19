@@ -74,7 +74,12 @@ func newDuplicatesView(repos []scanner.Repo) *duplicatesView {
 func (v *duplicatesView) Init() tea.Cmd { return nil }
 
 func (v *duplicatesView) Title() string {
-	base := fmt.Sprintf("duplicates · %d groups", len(v.groups))
+	// Count reflects the active type filter (v.filtered is the shown subset).
+	n := len(v.groups)
+	if v.built {
+		n = len(v.filtered)
+	}
+	base := fmt.Sprintf("duplicates · %d groups", n)
 	if v.provSel > 0 && v.provSel-1 < len(v.provCycle) {
 		base += " · " + provider.Meta(v.provCycle[v.provSel-1]).Name
 	}
