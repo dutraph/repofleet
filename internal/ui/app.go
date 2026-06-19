@@ -188,15 +188,22 @@ func (m Model) footerBar() string {
 func (m Model) helpView() string {
 	var b strings.Builder
 	b.WriteString(theme.Title.Render(" fleet — help ") + "\n\n")
-	rows := [][]key.Binding{m.top().ShortHelp()}
-	rows = append(rows, m.top().FullHelp()...)
-	rows = append(rows, []key.Binding{keys.Home, keys.Remote, keys.Refresh, keys.Back, keys.Help, keys.Quit})
+
+	// Collect view-specific bindings (FullHelp already supersets
+	// ShortHelp), then the global ones, de-duplicating by key so the
+	// overlay never lists the same shortcut twice.
+	rows := append([][]key.Binding{}, m.top().FullHelp()...)
+	rows = append(rows, []key.Binding{keys.Home, keys.Back, keys.Help, keys.Quit})
+
+	seen := map[string]bool{}
 	for _, row := range rows {
 		for _, bind := range row {
-			if bind.Help().Key == "" {
+			k := bind.Help().Key
+			if k == "" || seen[k] {
 				continue
 			}
-			b.WriteString("  " + theme.HelpKey.Render(pad(bind.Help().Key, 10)) + theme.HelpDesc.Render(bind.Help().Desc) + "\n")
+			seen[k] = true
+			b.WriteString("  " + theme.HelpKey.Render(pad(k, 10)) + theme.HelpDesc.Render(bind.Help().Desc) + "\n")
 		}
 	}
 	b.WriteString("\n" + theme.Faint.Render("  press any key to close"))

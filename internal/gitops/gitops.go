@@ -92,6 +92,82 @@ func Fetch(repoPath string) Result {
 	return run(repoPath, "fetch", "--all", "--prune")
 }
 
+// PullPrune runs `git pull --ff-only --prune`, so it also prunes stale
+// remote-tracking branches while fast-forwarding.
+func PullPrune(repoPath string) Result {
+	return run(repoPath, "pull", "--ff-only", "--prune")
+}
+
+// Checkout switches the working tree to branch (creating a tracking
+// branch automatically when only the remote one exists).
+func Checkout(repoPath, branch string) Result {
+	return run(repoPath, "checkout", branch)
+}
+
+// Branch is a single ref the user can switch to.
+type Branch struct {
+	Name    string // display name; remotes keep their "origin/" prefix
+	Remote  bool   // true when this is a remote-tracking ref
+	Current bool   // true for the checked-out branch
+}
+
+// CheckoutName returns the argument to pass to `git checkout`: the short
+// name for a remote ref (so git creates a tracking branch instead of a
+// detached HEAD), or the name itself for a local branch.
+func (b Branch) CheckoutName() string {
+	if b.Remote {
+		if i := strings.Index(b.Name, "/"); i >= 0 {
+			return b.Name[i+1:]
+		}
+	}
+	return b.Name
+}
+
+// Branches lists local heads first, then remote-tracking branches that
+// have no local counterpart.
+func Branches(repoPath string) ([]Branch, error) {
+	cur := run(repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+	current := ""
+	if cur.Err == nil {
+		current = strings.TrimSpace(cur.Output)
+	}
+
+	local := run(repoPath, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	if local.Err != nil {
+		return nil, fmt.Errorf("list branches: %s", local.Output)
+	}
+
+	var out []Branch
+	localShort := map[string]bool{}
+	for _, b := range strings.Split(local.Output, "\n") {
+		b = strings.TrimSpace(b)
+		if b == "" {
+			continue
+		}
+		localShort[b] = true
+		out = append(out, Branch{Name: b, Current: b == current})
+	}
+
+	remote := run(repoPath, "for-each-ref", "--format=%(refname:short)", "refs/remotes")
+	if remote.Err == nil {
+		for _, b := range strings.Split(remote.Output, "\n") {
+			b = strings.TrimSpace(b)
+			if b == "" || strings.HasSuffix(b, "/HEAD") {
+				continue
+			}
+			short := b
+			if i := strings.Index(b, "/"); i >= 0 {
+				short = b[i+1:]
+			}
+			if !localShort[short] {
+				out = append(out, Branch{Name: b, Remote: true})
+				localShort[short] = true // dedupe multiple remotes
+			}
+		}
+	}
+	return out, nil
+}
+
 // StatusText runs a human-readable `git status -sb` for the detail pane.
 func StatusText(repoPath string) Result {
 	return run(repoPath, "status", "-sb")

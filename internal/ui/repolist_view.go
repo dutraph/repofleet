@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -20,8 +19,8 @@ import (
 
 // repoListView is the home screen: every local git repo found on disk,
 // with its provider icon, branch, status and duplicate marker. Repos
-// can be multi-selected for bulk pull/fetch, filtered with `/`, and
-// grouped by provider with `t`.
+// can be multi-selected for bulk actions, searched with `/`, and
+// narrowed to a single provider with `t`.
 type repoListView struct {
 	cfg      *config.Config
 	repos    []scanner.Repo
@@ -30,23 +29,19 @@ type repoListView struct {
 
 	filter    textinput.Model
 	filtering bool
-	groupBy   bool
 
-	rowItems []rowItem // parallel to the table's rows
+	// provider filter: provSel 0 = all; otherwise provCycle[provSel-1].
+	provCycle []provider.Kind
+	provSel   int
+
+	filtered []int // indices into v.repos currently shown
 	tbl      table.Model
 	w, h     int
 	loading  bool
 	built    bool
 }
 
-// rowItem maps a visible table row to either a group header (idx < 0)
-// or a repo (idx into v.repos).
-type rowItem struct {
-	header string
-	idx    int
-}
-
-// groupOrder is the fixed provider order used when grouping.
+// groupOrder is the fixed provider order used by the `t` type filter.
 var groupOrder = []provider.Kind{
 	provider.GitHub, provider.GitLab, provider.AzureDevOps,
 	provider.Bitbucket, provider.Local, provider.Unknown,
@@ -79,6 +74,10 @@ type gitResultMsg struct {
 	res    gitops.Result
 	action string
 }
+type repoDeletedMsg struct {
+	path string
+	err  error
+}
 
 func scanCmd(roots []string) tea.Cmd {
 	return func() tea.Msg {
@@ -97,10 +96,19 @@ func gitActionCmd(path, action string) tea.Cmd {
 		switch action {
 		case "pull":
 			res = gitops.Pull(path)
+		case "pullprune":
+			res = gitops.PullPrune(path)
 		case "fetch":
 			res = gitops.Fetch(path)
 		}
 		return gitResultMsg{res: res, action: action}
+	}
+}
+
+func deleteRepoCmd(path string) tea.Cmd {
+	return func() tea.Msg {
+		err := os.RemoveAll(path)
+		return repoDeletedMsg{path: path, err: err}
 	}
 }
 
@@ -117,8 +125,8 @@ func (v *repoListView) Title() string {
 		}
 	}
 	base := fmt.Sprintf("repos · %d found · %d dup", len(v.repos), dups)
-	if v.groupBy {
-		base += " · grouped"
+	if v.provSel > 0 && v.provSel-1 < len(v.provCycle) {
+		base += " · " + provider.Meta(v.provCycle[v.provSel-1]).Name
 	}
 	if q := strings.TrimSpace(v.filter.Value()); q != "" {
 		base += " · /" + q
@@ -141,6 +149,7 @@ func (v *repoListView) Update(msg tea.Msg) (view, tea.Cmd) {
 			return v, fail(msg.err)
 		}
 		v.repos = msg.repos
+		v.computeProvCycle()
 		v.rebuild()
 		cmds := make([]tea.Cmd, 0, len(v.repos))
 		for _, r := range v.repos {
@@ -163,6 +172,13 @@ func (v *repoListView) Update(msg tea.Msg) (view, tea.Cmd) {
 			statusCmd(msg.res.Path),
 		)
 
+	case repoDeletedMsg:
+		if msg.err != nil {
+			return v, fail(fmt.Errorf("remove failed: %v", msg.err))
+		}
+		delete(v.selected, msg.path)
+		return v, tea.Batch(toast("removed "+filepath.Base(msg.path)), scanCmd(v.cfg.ScanRoots))
+
 	case cloneDoneMsg:
 		if msg.err != nil {
 			return v, fail(fmt.Errorf("clone failed: %v", msg.err))
@@ -170,8 +186,6 @@ func (v *repoListView) Update(msg tea.Msg) (view, tea.Cmd) {
 		return v, tea.Batch(toast("cloned → "+msg.dest), scanCmd(v.cfg.ScanRoots))
 
 	case tea.KeyMsg:
-		// While the filter input is focused it swallows every key
-		// except esc (cancel) and enter (apply & keep).
 		if v.filtering {
 			switch msg.String() {
 			case "esc":
@@ -196,8 +210,8 @@ func (v *repoListView) Update(msg tea.Msg) (view, tea.Cmd) {
 			v.filtering = true
 			v.filter.Focus()
 			return v, textinput.Blink
-		case key.Matches(msg, keyGroup):
-			v.groupBy = !v.groupBy
+		case key.Matches(msg, keyTypeFilter):
+			v.provSel = (v.provSel + 1) % (len(v.provCycle) + 1)
 			v.rebuild()
 			return v, nil
 		case key.Matches(msg, keyToggle):
@@ -212,8 +226,29 @@ func (v *repoListView) Update(msg tea.Msg) (view, tea.Cmd) {
 			return v, nil
 		case key.Matches(msg, keyPull):
 			return v, v.runOnTargets("pull")
+		case key.Matches(msg, keyPullPrune):
+			return v, v.runOnTargets("pullprune")
 		case key.Matches(msg, keyFetch):
 			return v, v.runOnTargets("fetch")
+		case key.Matches(msg, keyFetchAll):
+			return v, v.runOnAll("fetch")
+		case key.Matches(msg, keyBranch):
+			if r := v.current(); r != nil {
+				rr := *r
+				return v, func() tea.Msg { return pushViewMsg{newBranchView(rr)} }
+			}
+			return v, nil
+		case key.Matches(msg, keyDelete):
+			if r := v.current(); r != nil {
+				path := r.Path
+				cv := newConfirmView("remove repository?", []string{
+					"Permanently deletes this working copy from disk:",
+					"  " + shortenPath(path),
+					"Unpushed commits or stashes will be lost.",
+				}, deleteRepoCmd(path))
+				return v, func() tea.Msg { return pushViewMsg{cv} }
+			}
+			return v, nil
 		case key.Matches(msg, keyDetail):
 			if r := v.current(); r != nil {
 				return v, func() tea.Msg { return pushViewMsg{newDetailView(*r)} }
@@ -254,45 +289,46 @@ func (v *repoListView) View(width, height int) string {
 
 // --- helpers ---
 
-// filterShown reports whether the filter line occupies a row on screen.
 func (v *repoListView) filterShown() bool {
 	return v.filtering || v.filter.Value() != ""
 }
 
-func (v *repoListView) current() *scanner.Repo {
-	i := v.tbl.Cursor()
-	if i < 0 || i >= len(v.rowItems) {
-		return nil
+// computeProvCycle records which providers are actually present so the
+// `t` filter only cycles through meaningful options.
+func (v *repoListView) computeProvCycle() {
+	present := map[provider.Kind]bool{}
+	for _, r := range v.repos {
+		present[r.Provider] = true
 	}
-	ri := v.rowItems[i]
-	if ri.idx < 0 {
-		return nil // a group header — not selectable
-	}
-	return &v.repos[ri.idx]
-}
-
-// visibleRepoIdx returns the repo indices currently shown (after filter).
-func (v *repoListView) visibleRepoIdx() []int {
-	var out []int
-	for _, ri := range v.rowItems {
-		if ri.idx >= 0 {
-			out = append(out, ri.idx)
+	v.provCycle = v.provCycle[:0]
+	for _, k := range groupOrder {
+		if present[k] {
+			v.provCycle = append(v.provCycle, k)
 		}
 	}
-	return out
+	if v.provSel > len(v.provCycle) {
+		v.provSel = 0
+	}
+}
+
+func (v *repoListView) current() *scanner.Repo {
+	i := v.tbl.Cursor()
+	if i < 0 || i >= len(v.filtered) {
+		return nil
+	}
+	return &v.repos[v.filtered[i]]
 }
 
 // toggleAll selects (or clears) every currently visible repo.
 func (v *repoListView) toggleAll() {
-	vis := v.visibleRepoIdx()
-	all := len(vis) > 0
-	for _, i := range vis {
+	all := len(v.filtered) > 0
+	for _, i := range v.filtered {
 		if !v.selected[v.repos[i].Path] {
 			all = false
 			break
 		}
 	}
-	for _, i := range vis {
+	for _, i := range v.filtered {
 		v.selected[v.repos[i].Path] = !all
 	}
 }
@@ -315,7 +351,14 @@ func (v *repoListView) targets() []scanner.Repo {
 }
 
 func (v *repoListView) runOnTargets(action string) tea.Cmd {
-	targets := v.targets()
+	return v.runOn(v.targets(), action)
+}
+
+func (v *repoListView) runOnAll(action string) tea.Cmd {
+	return v.runOn(v.repos, action)
+}
+
+func (v *repoListView) runOn(targets []scanner.Repo, action string) tea.Cmd {
 	if len(targets) == 0 {
 		return nil
 	}
@@ -327,8 +370,13 @@ func (v *repoListView) runOnTargets(action string) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// matches reports whether a repo passes the current filter query.
+// matches reports whether a repo passes the text + provider filters.
 func (v *repoListView) matches(r scanner.Repo, q string) bool {
+	if v.provSel > 0 && v.provSel-1 < len(v.provCycle) {
+		if r.Provider != v.provCycle[v.provSel-1] {
+			return false
+		}
+	}
 	if q == "" {
 		return true
 	}
@@ -336,54 +384,17 @@ func (v *repoListView) matches(r scanner.Repo, q string) bool {
 	return strings.Contains(hay, q)
 }
 
-// buildRowItems applies the filter and (optional) grouping to produce
-// the ordered list of header/repo rows.
-func (v *repoListView) buildRowItems() {
-	q := strings.ToLower(strings.TrimSpace(v.filter.Value()))
-	var fidx []int
-	for i, r := range v.repos {
-		if v.matches(r, q) {
-			fidx = append(fidx, i)
-		}
-	}
-
-	v.rowItems = v.rowItems[:0]
-	if !v.groupBy {
-		for _, i := range fidx {
-			v.rowItems = append(v.rowItems, rowItem{idx: i})
-		}
-		return
-	}
-
-	groups := map[provider.Kind][]int{}
-	for _, i := range fidx {
-		k := v.repos[i].Provider
-		groups[k] = append(groups[k], i)
-	}
-	for _, k := range groupOrder {
-		idxs := groups[k]
-		if len(idxs) == 0 {
-			continue
-		}
-		sort.Slice(idxs, func(a, b int) bool {
-			return v.repos[idxs[a]].Name < v.repos[idxs[b]].Name
-		})
-		meta := provider.Meta(k)
-		v.rowItems = append(v.rowItems, rowItem{
-			header: fmt.Sprintf("%s  %s (%d)", meta.Icon, meta.Name, len(idxs)),
-			idx:    -1,
-		})
-		for _, i := range idxs {
-			v.rowItems = append(v.rowItems, rowItem{idx: i})
-		}
-	}
-}
-
 func (v *repoListView) rebuild() {
 	if v.w == 0 {
 		v.w = 100
 	}
-	v.buildRowItems()
+	q := strings.ToLower(strings.TrimSpace(v.filter.Value()))
+	v.filtered = v.filtered[:0]
+	for i, r := range v.repos {
+		if v.matches(r, q) {
+			v.filtered = append(v.filtered, i)
+		}
+	}
 
 	const (
 		wSel    = 2
@@ -412,13 +423,9 @@ func (v *repoListView) rebuild() {
 		{Title: "PATH", Width: wPath},
 	}
 
-	rows := make([]table.Row, 0, len(v.rowItems))
-	for _, ri := range v.rowItems {
-		if ri.idx < 0 { // group header
-			rows = append(rows, table.Row{"", "", "", ri.header, "", "", strings.Repeat("─", wPath)})
-			continue
-		}
-		r := v.repos[ri.idx]
+	rows := make([]table.Row, 0, len(v.filtered))
+	for _, i := range v.filtered {
+		r := v.repos[i]
 		meta := provider.Meta(r.Provider)
 		sel := " "
 		if v.selected[r.Path] {
@@ -466,22 +473,27 @@ func shortenPath(p string) string {
 // --- view-local key bindings ---
 
 var (
-	keyToggle    = key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "select"))
-	keySelectAll = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "select all"))
-	keyPull      = key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pull"))
-	keyFetch     = key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "fetch"))
-	keyDetail    = key.NewBinding(key.WithKeys("enter", "s"), key.WithHelp("enter", "details"))
-	keyFilter    = key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search"))
-	keyGroup     = key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "group by type"))
+	keyToggle     = key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "select"))
+	keySelectAll  = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "select all"))
+	keyPull       = key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pull (ff-only)"))
+	keyPullPrune  = key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "pull --prune"))
+	keyFetch      = key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "fetch"))
+	keyFetchAll   = key.NewBinding(key.WithKeys("F"), key.WithHelp("F", "fetch all (sync)"))
+	keyBranch     = key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "branch"))
+	keyDelete     = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "remove"))
+	keyDetail     = key.NewBinding(key.WithKeys("enter", "s"), key.WithHelp("enter", "details"))
+	keyFilter     = key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search"))
+	keyTypeFilter = key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "filter by type"))
 )
 
 func (v *repoListView) ShortHelp() []key.Binding {
-	return []key.Binding{keyFilter, keyGroup, keyToggle, keyPull, keyFetch, keys.Remote}
+	return []key.Binding{keyFilter, keyTypeFilter, keyToggle, keyPull, keyFetch, keys.Remote}
 }
 
 func (v *repoListView) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{keyFilter, keyGroup, keyToggle, keySelectAll, keyDetail},
-		{keyPull, keyFetch, keys.Remote, keys.Refresh},
+		{keyFilter, keyTypeFilter, keyToggle, keySelectAll, keyDetail},
+		{keyPull, keyPullPrune, keyFetch, keyFetchAll},
+		{keyBranch, keyDelete, keys.Remote, keys.Refresh},
 	}
 }
