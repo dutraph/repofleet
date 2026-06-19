@@ -46,6 +46,22 @@ type cloneDoneMsg struct {
 	err  error
 }
 
+// execGitMsg asks the root model to suspend the TUI and run an arbitrary
+// `git` command (entered via the `:` command bar) against one repo, so
+// interactive commands like commit/rebase work and the user sees the
+// full output.
+type execGitMsg struct {
+	path string
+	args string // raw git arguments, e.g. "log --oneline -10"
+}
+
+// gitExecDoneMsg is delivered after the `:` git command exits.
+type gitExecDoneMsg struct {
+	path string
+	args string
+	err  error
+}
+
 // toast is a small helper to fire a confirmation toast from any view.
 func toast(text string) tea.Cmd {
 	return func() tea.Msg { return toastMsg{text: text} }

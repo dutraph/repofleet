@@ -114,6 +114,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 			return cloneDoneMsg{dest: msg.dest, err: err}
 		})
+
+	case execGitMsg:
+		cmd := gitops.CommandLine(msg.path, msg.args)
+		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return gitExecDoneMsg{path: msg.path, args: msg.args, err: err}
+		})
 	}
 
 	// Everything else (scan results, status updates, git results, clone

@@ -197,3 +197,22 @@ func DestExists(dest string) bool {
 	entries, err := os.ReadDir(dest)
 	return err == nil && len(entries) > 0
 }
+
+// CommandLine builds an interactive `git` command for the `:` command
+// bar. It runs through `sh -c` so the user's git config (aliases,
+// pager, editor) and interactive commands (commit, rebase -i, add -p)
+// all work, and pauses afterwards so the output stays on screen until
+// the user presses Enter. rawArgs is whatever the user typed (an
+// optional leading "git " is stripped by the caller).
+func CommandLine(repoPath, rawArgs string) *exec.Cmd {
+	q := shellSingleQuote(repoPath)
+	script := "git -C " + q + " " + rawArgs +
+		"; status=$?; printf '\\n\\033[2m── press Enter to return ──\\033[0m'; read _; exit $status"
+	return exec.Command("sh", "-c", script)
+}
+
+// shellSingleQuote wraps s in single quotes, safely escaping any single
+// quotes inside it, so it can be embedded in an sh -c script.
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
