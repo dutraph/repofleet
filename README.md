@@ -80,7 +80,7 @@ fleet accounts        # lista as contas configuradas (★ = ativa)
 fleet switch <nome>   # troca a conta ativa
 ```
 
-Atalhos na TUI: `espaço` seleciona · `p` pull · `f` fetch · `enter` detalhes · `c` clonar do servidor · `/` filtrar · `r` rescan · `?` ajuda · `q` sair.
+Atalhos na TUI: `espaço` seleciona · `p` pull · `f` fetch · `enter` detalhes · `t` agrupar por tipo · `/` buscar · `c` clonar do servidor · `r` rescan · `?` ajuda · `q` sair.
 
 Os diretórios varridos ficam em `scan_roots` no config (`~/.config/repos/config.yaml`); por padrão é o seu `$HOME`.
 
@@ -150,7 +150,7 @@ fleet accounts        # list configured accounts (★ = active)
 fleet switch <name>   # switch the active account
 ```
 
-TUI keys: `space` select · `p` pull · `f` fetch · `enter` details · `c` clone from server · `/` filter · `r` rescan · `?` help · `q` quit.
+TUI keys: `space` select · `p` pull · `f` fetch · `enter` details · `t` group by type · `/` search · `c` clone from server · `r` rescan · `?` help · `q` quit.
 
 Scanned directories live under `scan_roots` in the config (`~/.config/repos/config.yaml`); defaults to your `$HOME`.
 
@@ -220,7 +220,7 @@ fleet accounts        # lista las cuentas configuradas (★ = activa)
 fleet switch <nombre> # cambia la cuenta activa
 ```
 
-Atajos en la TUI: `espacio` selecciona · `p` pull · `f` fetch · `enter` detalles · `c` clonar del servidor · `/` filtrar · `r` rescan · `?` ayuda · `q` salir.
+Atajos en la TUI: `espacio` selecciona · `p` pull · `f` fetch · `enter` detalles · `t` agrupar por tipo · `/` buscar · `c` clonar del servidor · `r` rescan · `?` ayuda · `q` salir.
 
 Los directorios escaneados están en `scan_roots` del config (`~/.config/repos/config.yaml`); por defecto tu `$HOME`.
 
