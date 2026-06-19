@@ -6,6 +6,7 @@ source for each release's description.
 
 | Version | Notes | Highlights |
 | --- | --- | --- |
+| v1.0.2 | [v1.0.2.md](v1.0.2.md) | Filter-aware header counts (list + duplicates) |
 | v1.0.1 | [v1.0.1.md](v1.0.1.md) | Filter duplicates by provider type; stop tracking the build binary |
 | v1.0.0 | [v1.0.0.md](v1.0.0.md) | First stable release — full local + remote repo management TUI |
 
