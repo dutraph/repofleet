@@ -35,7 +35,7 @@ help:
 	@echo "  make clean      remove the local build artifact"
 
 build:
-	@v="$$(cat $(VERSION_FILE) 2>/dev/null | tr -d '[:space:]')"; \
+	@v="$$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' $(VERSION_FILE) 2>/dev/null | tail -n1)"; \
 	[ -n "$$v" ] || v=dev; \
 	echo "Building $(BIN) v$$v..."; \
 	go build -ldflags '$(STRIP_LD) -X github.com/dutraph/repofleet/internal/version.Version='"$$v" -o $(BIN) $(PKG)
@@ -44,7 +44,7 @@ run: build
 	./$(BIN)
 
 install:
-	@current="$$(cat $(VERSION_FILE) 2>/dev/null | tr -d '[:space:]')"; \
+	@current="$$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' $(VERSION_FILE) 2>/dev/null | tail -n1)"; \
 	[ -n "$$current" ] || current="0.0.0"; \
 	if [ -n "$(VERSION)" ]; then \
 		new="$(VERSION)"; \
@@ -75,7 +75,7 @@ uninstall:
 	@echo "Removed $(DESTDIR)$(BINDIR)/$(BIN)"
 
 version:
-	@v="$$(cat $(VERSION_FILE) 2>/dev/null | tr -d '[:space:]')"; \
+	@v="$$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' $(VERSION_FILE) 2>/dev/null | tail -n1)"; \
 	if [ -z "$$v" ]; then \
 		echo "no $(VERSION_FILE) file yet (run \`echo 0.1.0 > $(VERSION_FILE)\`)"; \
 	else \
